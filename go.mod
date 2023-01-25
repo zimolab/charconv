@@ -1,4 +1,4 @@
-module charconv
+module github.com/zimolab/charconv
 
 go 1.19
 

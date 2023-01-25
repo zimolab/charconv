@@ -159,10 +159,62 @@ func EncodeTo(src io.Reader, dest io.Writer, destCharset string) error {
 	return err
 }
 
+func EncodeToFile(srcFilePath string, destFilePath string, destFileFlag int, destCharset string) error {
+	if destCharset == UTF8 {
+		return unsupportedConversion(UTF8, destCharset)
+	}
+	// 打开srcFile
+	srcFile, err := os.Open(srcFilePath)
+	if err != nil {
+		return err
+	}
+	defer closeQuietly(srcFile)
+	// 打开临时文件
+	tmpFile, err := os.CreateTemp("", "*")
+	if err != nil {
+		return err
+	}
+	defer removeQuietly(tmpFile)
+
+	// 先将编码后内容写入临时文件
+	err = EncodeTo(srcFile, tmpFile, destCharset)
+	if err != nil {
+		return err
+	}
+	// 再将临时文件拷贝到目标文件
+	return copyTmpToDest(tmpFile, destFilePath, destFileFlag)
+}
+
+func DecodeToFile(srcFilePath string, destFilePath string, destFileFlag int, srcCharset string) error {
+	if srcCharset == UTF8 {
+		return unsupportedConversion(srcCharset, UTF8)
+	}
+	// 打开srcFile
+	srcFile, err := os.Open(srcFilePath)
+	if err != nil {
+		return err
+	}
+	defer closeQuietly(srcFile)
+	// 打开临时文件
+	tmpFile, err := os.CreateTemp("", "*")
+	if err != nil {
+		return err
+	}
+	defer removeQuietly(tmpFile)
+
+	// 先将编码后内容写入临时文件
+	err = DecodeTo(srcFile, tmpFile, srcCharset)
+	if err != nil {
+		return err
+	}
+	// 再将临时文件拷贝到目标文件
+	return copyTmpToDest(tmpFile, destFilePath, destFileFlag)
+}
+
 // DecodeTo 将指定字符集数据源src编码为utf-8，并写入dest中
 func DecodeTo(src io.Reader, dest io.Writer, srcCharset string) error {
 	if srcCharset == UTF8 {
-		return unsupportedConversion(UTF8, srcCharset)
+		return unsupportedConversion(srcCharset, UTF8)
 	}
 	decoder := DecoderOf(srcCharset)
 	if decoder == nil {
@@ -211,37 +263,18 @@ func ConvertFile(srcFilePath string, destFilePath string, destFileFlag int, srcC
 	if srcCharset == destCharset {
 		return unsupportedConversion(srcCharset, destCharset)
 	}
-	// 打开srcFile
-	srcFile, err := os.Open(srcFilePath)
-	if err != nil {
-		return err
-	}
-	defer quitClose(srcFile)
-	// 打开临时文件
-	tmpFile, err := os.CreateTemp("", "*")
-	if err != nil {
-		return err
-	}
-	defer quitRemove(tmpFile)
 
+	// utf-8 => destCharset（编码过程）
 	if srcCharset == UTF8 {
-		// 先将编码后内容写入临时文件
-		err = EncodeTo(srcFile, tmpFile, destCharset)
-		if err != nil {
-			return err
-		}
-		return copyTmpToDest(tmpFile, destFilePath, destFileFlag)
+		return EncodeToFile(srcFilePath, destFilePath, destFileFlag, destCharset)
 	}
 
+	// srcCharset => utf-8 (解码过程)
 	if destCharset == UTF8 {
-		// 先将解码后内容写入临时文件
-		err = DecodeTo(srcFile, tmpFile, srcCharset)
-		if err != nil {
-			return err
-		}
-		return copyTmpToDest(tmpFile, destFilePath, destFileFlag)
+		return DecodeToFile(srcFilePath, destFilePath, destFileFlag, srcFilePath)
 	}
 
+	// srcCharset => destCharset (srcCharset、destCharset均不为utf-8，需先将srcCharset数据解码成utf-8，再重新编码为destCharset形式)
 	decoder := DecoderOf(srcCharset)
 	if decoder == nil {
 		return unsupported(srcCharset)
@@ -252,6 +285,18 @@ func ConvertFile(srcFilePath string, destFilePath string, destFileFlag int, srcC
 		return unsupported(destCharset)
 	}
 
+	srcFile, err := os.Open(srcFilePath)
+	if err != nil {
+		return err
+	}
+	defer closeQuietly(srcFile)
+
+	tmpFile, err := os.CreateTemp("", "*")
+	if err != nil {
+		return err
+	}
+	defer removeQuietly(tmpFile)
+
 	decodeReader := transform.NewReader(srcFile, decoder)
 	encodeReader := transform.NewReader(decodeReader, encoder)
 	_, err = io.Copy(tmpFile, encodeReader)
@@ -261,7 +306,7 @@ func ConvertFile(srcFilePath string, destFilePath string, destFileFlag int, srcC
 	return copyTmpToDest(tmpFile, destFilePath, destFileFlag)
 }
 
-func quitClose(file *os.File) {
+func closeQuietly(file *os.File) {
 	err := file.Close()
 	if err != nil {
 		fmt.Println("error on closing file:", err)
@@ -269,13 +314,10 @@ func quitClose(file *os.File) {
 	}
 }
 
-func quitRemove(file *os.File) {
-	err := file.Close()
-	if err != nil {
-		fmt.Println("error on remove file:", err)
-		return
-	}
-	err = os.Remove(file.Name())
+func removeQuietly(file *os.File) {
+	filename := file.Name()
+	closeQuietly(file)
+	err := os.Remove(filename)
 	if err != nil {
 		fmt.Println("error on remove file:", err)
 		return
@@ -294,7 +336,7 @@ func copyTmpToDest(tmp *os.File, destPath string, destFlag int) error {
 	if err != nil {
 		return err
 	}
-	defer quitClose(destFile)
+	defer closeQuietly(destFile)
 
 	// 将临时文件拷贝到目标文件中
 	_, err = io.Copy(destFile, tmp)

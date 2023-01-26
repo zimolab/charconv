@@ -1,8 +1,13 @@
 package charconv
 
 import (
+	"bytes"
+	"fmt"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/ianaindex"
+	"io"
+	"os"
+	"strings"
 )
 
 // 中文
@@ -100,4 +105,91 @@ func EncodingOf(charsetName string) encoding.Encoding {
 		return nil
 	}
 	return en
+}
+
+const CreateOrTrunc = os.O_RDWR | os.O_CREATE | os.O_TRUNC
+
+// EncoderOf 获取charsetName对应Encoder
+func EncoderOf(charsetName string) *encoding.Encoder {
+	en := EncodingOf(charsetName)
+	if en == nil {
+		return nil
+	}
+	return en.NewEncoder()
+}
+
+// DecoderOf 获取charsetName对应的Decoder
+func DecoderOf(charsetName string) *encoding.Decoder {
+	en := EncodingOf(charsetName)
+	if en == nil {
+		return nil
+	}
+	return en.NewDecoder()
+}
+
+// CodecOf 获取charsetNamed对应的Encoder和Decoder
+func CodecOf(charsetName string) (*encoding.Encoder, *encoding.Decoder, error) {
+	en := EncodingOf(charsetName)
+	if en == nil {
+		return nil, nil, unsupported(charsetName)
+	}
+	return en.NewEncoder(), en.NewDecoder(), nil
+}
+
+// IsCharsetSupported 判断字符集是受支持
+func IsCharsetSupported(charset string) bool {
+	return EncodingOf(charset) != nil
+}
+
+func CopyTmpFileTo(tmp *os.File, destPath string, destFlag int) error {
+	// 重置临时文件读取点
+	_, err := tmp.Seek(0, io.SeekStart)
+	if err != nil {
+		return err
+	}
+
+	// 打开目标文件
+	destFile, err := os.OpenFile(destPath, destFlag, 0666)
+	if err != nil {
+		return err
+	}
+	defer CloseQuietly(destFile)
+
+	// 将临时文件拷贝到目标文件中
+	_, err = io.Copy(destFile, tmp)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func CloseQuietly(file *os.File) {
+	err := file.Close()
+	if err != nil {
+		fmt.Println("error on closing file:", err)
+		return
+	}
+}
+
+func RemoveQuietly(file *os.File) {
+	filename := file.Name()
+	CloseQuietly(file)
+	err := os.Remove(filename)
+	if err != nil {
+		fmt.Println("error on remove file:", err)
+		return
+	}
+}
+
+func MakeTempFile() (*os.File, error) {
+	return os.CreateTemp("", "*")
+}
+
+func MakeByteBuffer(initBufferSize int) *bytes.Buffer {
+	buff := make([]byte, 0, initBufferSize)
+	return bytes.NewBuffer(buff)
+}
+
+func charsetEquals(charsetA, charsetB string) bool {
+	return strings.ToUpper(charsetA) == strings.ToUpper(charsetB)
 }

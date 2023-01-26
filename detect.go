@@ -38,6 +38,6 @@ func GuessBestOfFile(filePath string, bytesToDetect int) (*chardet.Result, error
 	if err != nil {
 		return nil, err
 	}
-	defer closeQuietly(file)
+	defer CloseQuietly(file)
 	return GuessBestOf(file, bytesToDetect)
 }
